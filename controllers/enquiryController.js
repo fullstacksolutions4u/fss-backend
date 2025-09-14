@@ -1,15 +1,13 @@
-// controllers/enquiryController.js - Minimal working version
 import Enquiry from '../models/Enquiry.js';
 import { createResponse } from '../utils/response.js';
+import mongoose from 'mongoose';
 
-// Simple enquiry service functions (inline for now)
 const createEnquiryService = async (enquiryData) => {
   const enquiry = new Enquiry(enquiryData);
   await enquiry.save();
   
-  // Log email notifications (no actual sending for now)
-  console.log('📧 Email notification sent to admin for:', enquiry.name);
-  console.log('📧 Confirmation email sent to:', enquiry.email);
+  console.log('Email notification sent to admin for:', enquiry.name);
+  console.log('Confirmation email sent to:', enquiry.email);
   
   return enquiry;
 };
@@ -29,9 +27,7 @@ const getAllEnquiriesService = async (filters = {}, options = {}) => {
     Enquiry.find(filters)
       .sort(sort)
       .skip(skip)
-      .limit(parseInt(limit))
-      .populate('assignedTo', 'name email')
-      .populate('notes.addedBy', 'name email'),
+      .limit(parseInt(limit)),
     Enquiry.countDocuments(filters)
   ]);
 
@@ -50,7 +46,6 @@ const getAllEnquiriesService = async (filters = {}, options = {}) => {
   };
 };
 
-// Controller functions
 export const createEnquiry = async (req, res, next) => {
   try {
     const enquiryData = {
@@ -87,7 +82,6 @@ export const getAllEnquiries = async (req, res, next) => {
       sortOrder = 'desc'
     } = req.query;
 
-    // Build filters
     const filters = {};
     if (status) filters.status = status;
     if (service) filters.service = service;
@@ -120,217 +114,16 @@ export const getAllEnquiries = async (req, res, next) => {
   }
 };
 
-export const getEnquiryById = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-
-    const enquiry = await Enquiry.findById(id)
-      .populate('assignedTo', 'name email')
-      .populate('notes.addedBy', 'name email')
-      .populate('statusHistory.changedBy', 'name email');
-
-    if (!enquiry) {
-      return res.status(404).json(createResponse(
-        false,
-        'Enquiry not found'
-      ));
-    }
-
-    res.json(createResponse(
-      true,
-      'Enquiry retrieved successfully',
-      { enquiry }
-    ));
-  } catch (error) {
-    console.error('Get enquiry by ID error:', error);
-    next(error);
-  }
-};
-
-export const updateEnquiryStatus = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { status, reason } = req.body;
-
-    const enquiry = await Enquiry.findById(id);
-    if (!enquiry) {
-      return res.status(404).json(createResponse(
-        false,
-        'Enquiry not found'
-      ));
-    }
-
-    // Update status
-    const oldStatus = enquiry.status;
-    enquiry.status = status;
-
-    // Add to status history
-    enquiry.statusHistory.push({
-      status,
-      changedBy: req.admin?.id || null,
-      changedAt: new Date(),
-      reason: reason || null
-    });
-
-    await enquiry.save();
-
-    // Populate for response
-    await enquiry.populate([
-      { path: 'assignedTo', select: 'name email' },
-      { path: 'statusHistory.changedBy', select: 'name email' }
-    ]);
-
-    console.log(`📧 Status update email sent to ${enquiry.email}: ${oldStatus} → ${status}`);
-
-    res.json(createResponse(
-      true,
-      'Enquiry status updated successfully',
-      { enquiry }
-    ));
-  } catch (error) {
-    console.error('Update enquiry status error:', error);
-    next(error);
-  }
-};
-
-export const addNote = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { note, isPrivate = false } = req.body;
-
-    const enquiry = await Enquiry.findById(id);
-    if (!enquiry) {
-      return res.status(404).json(createResponse(
-        false,
-        'Enquiry not found'
-      ));
-    }
-
-    // Add note
-    const newNote = {
-      note,
-      addedBy: req.admin?.id || null,
-      addedAt: new Date(),
-      isPrivate
-    };
-
-    enquiry.notes.push(newNote);
-    await enquiry.save();
-
-    // Populate for response
-    await enquiry.populate('notes.addedBy', 'name email');
-
-    res.json(createResponse(
-      true,
-      'Note added successfully',
-      { enquiry }
-    ));
-  } catch (error) {
-    console.error('Add note error:', error);
-    next(error);
-  }
-};
-
-export const getStats = async (req, res, next) => {
-  try {
-    const stats = await Enquiry.aggregate([
-      {
-        $facet: {
-          // Status counts
-          statusCounts: [
-            {
-              $group: {
-                _id: '$status',
-                count: { $sum: 1 }
-              }
-            }
-          ],
-          
-          // Service counts
-          serviceCounts: [
-            {
-              $group: {
-                _id: '$service',
-                count: { $sum: 1 }
-              }
-            }
-          ],
-          
-          // Total count
-          total: [
-            { $count: 'count' }
-          ],
-          
-          // Today's count
-          today: [
-            {
-              $match: {
-                createdAt: {
-                  $gte: new Date(new Date().setHours(0, 0, 0, 0))
-                }
-              }
-            },
-            { $count: 'count' }
-          ],
-          
-          // This week's count
-          thisWeek: [
-            {
-              $match: {
-                createdAt: {
-                  $gte: new Date(new Date().setDate(new Date().getDate() - 7))
-                }
-              }
-            },
-            { $count: 'count' }
-          ],
-          
-          // This month's count
-          thisMonth: [
-            {
-              $match: {
-                createdAt: {
-                  $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-                }
-              }
-            },
-            { $count: 'count' }
-          ]
-        }
-      }
-    ]);
-
-    const result = stats[0];
-    
-    const formattedStats = {
-      total: result.total[0]?.count || 0,
-      today: result.today[0]?.count || 0,
-      thisWeek: result.thisWeek[0]?.count || 0,
-      thisMonth: result.thisMonth[0]?.count || 0,
-      byStatus: result.statusCounts.reduce((acc, item) => {
-        acc[item._id] = item.count;
-        return acc;
-      }, {}),
-      byService: result.serviceCounts.reduce((acc, item) => {
-        acc[item._id] = item.count;
-        return acc;
-      }, {})
-    };
-
-    res.json(createResponse(
-      true,
-      'Statistics retrieved successfully',
-      { data: formattedStats }
-    ));
-  } catch (error) {
-    console.error('Get stats error:', error);
-    next(error);
-  }
-};
-
 export const deleteEnquiry = async (req, res, next) => {
   try {
     const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json(createResponse(
+        false,
+        'Invalid enquiry ID format'
+      ));
+    }
 
     const enquiry = await Enquiry.findByIdAndDelete(id);
     
@@ -352,16 +145,8 @@ export const deleteEnquiry = async (req, res, next) => {
   }
 };
 
-// Export as object for compatibility
-export const enquiryController = {
+export default {
   createEnquiry,
   getAllEnquiries,
-  getEnquiryById,
-  updateEnquiryStatus,
-  addNote,
-  getStats,
   deleteEnquiry
 };
-
-// Default export
-export default enquiryController;
