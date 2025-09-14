@@ -79,7 +79,7 @@ const enquirySchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-enquirySchema.index({ email: 1 });
+
 enquirySchema.index({ service: 1 });
 enquirySchema.index({ status: 1 });
 enquirySchema.index({ createdAt: -1 });

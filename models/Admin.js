@@ -62,7 +62,6 @@ const adminSchema = new mongoose.Schema({
 });
 
 
-adminSchema.index({ email: 1 });
 
 
 adminSchema.virtual('isLocked').get(function() {
